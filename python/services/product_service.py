@@ -7,7 +7,7 @@ from bson import ObjectId
 from datetime import datetime
 
 from database import products_collection
-from models.product import ProductRequest, ProductResponse
+from models.product import ProductRequest, ProductStatsResponse
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +33,75 @@ def product_to_response(product: dict) -> dict:
         "createdAt": product["createdAt"].isoformat() if product.get("createdAt") else None,
         "updatedAt": product["updatedAt"].isoformat() if product.get("updatedAt") else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Aggregation operations
+# ---------------------------------------------------------------------------
+
+async def get_product_stats() -> ProductStatsResponse:
+    """Compute aggregate statistics for the entire product catalogue.
+
+    Executes a single ``$facet`` aggregation pipeline so the database is hit
+    exactly once regardless of collection size.
+
+    Returns:
+        A :class:`~models.product.ProductStatsResponse` containing:
+
+        - **totalCount** – total number of products.
+        - **averagePrice** – mean price (``0.0`` when the catalogue is empty).
+        - **minPrice** / **maxPrice** – cheapest / most expensive price
+          (``None`` when the catalogue is empty).
+        - **categoryCount** – mapping of category → product count.
+    """
+    pipeline = [
+        {
+            "$facet": {
+                "totals": [
+                    {
+                        "$group": {
+                            "_id": None,
+                            "totalCount": {"$sum": 1},
+                            "averagePrice": {"$avg": "$price"},
+                            "minPrice": {"$min": "$price"},
+                            "maxPrice": {"$max": "$price"},
+                        }
+                    }
+                ],
+                "byCategory": [
+                    {
+                        "$group": {
+                            "_id": "$category",
+                            "count": {"$sum": 1},
+                        }
+                    }
+                ],
+            }
+        }
+    ]
+
+    results = await products_collection.aggregate(pipeline).to_list(length=1)
+    facet = results[0] if results else {"totals": [], "byCategory": []}
+
+    totals = facet["totals"][0] if facet["totals"] else {}
+    total_count: int = totals.get("totalCount", 0)
+    average_price: float = round(totals.get("averagePrice") or 0.0, 2)
+    min_price: float | None = totals.get("minPrice")
+    max_price: float | None = totals.get("maxPrice")
+
+    category_count: dict[str, int] = {
+        doc["_id"]: doc["count"]
+        for doc in facet["byCategory"]
+        if doc.get("_id") is not None  # skip documents without a category
+    }
+
+    return ProductStatsResponse(
+        totalCount=total_count,
+        averagePrice=average_price,
+        minPrice=min_price,
+        maxPrice=max_price,
+        categoryCount=category_count,
+    )
 
 
 # ---------------------------------------------------------------------------
