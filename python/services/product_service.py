@@ -99,9 +99,8 @@ async def get_product_stats() -> ProductStatsResponse:
     max_price: float | None = totals.get("maxPrice")
 
     category_count: dict[str, int] = {
-        doc["_id"]: doc["count"]
+        (doc["_id"] if doc.get("_id") is not None else "Uncategorized"): doc["count"]
         for doc in facet["byCategory"]
-        if doc.get("_id") is not None  # skip documents without a category
     }
 
     return ProductStatsResponse(
