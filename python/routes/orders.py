@@ -4,13 +4,14 @@ All endpoints require a valid Bearer JWT token.
 Business logic is fully delegated to :mod:`services.order_service`.
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from fastapi.responses import JSONResponse
 
 from exceptions import OrderValidationError, InsufficientStockError
-from models.order import OrderRequest, OrderResponse
+from models.order import OrderRequest, OrderResponse, StatusUpdateRequest
 from security.jwt_handler import get_current_user
 import services.order_service as order_service
+from services.order_service import InvalidStatusTransitionError
 
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
@@ -92,6 +93,7 @@ async def create_order(
     summary="List all orders",
 )
 async def list_orders(
+    status_param: str | None = Query(default=None, alias="status", description="Filter by order status"),
     current_user: dict = Depends(get_current_user),
 ) -> list[dict]:
     """Return every order in the system, sorted newest first.
@@ -102,7 +104,7 @@ async def list_orders(
     Raises:
         **401** – missing / invalid token.
     """
-    return await order_service.get_all_orders()
+    return await order_service.get_all_orders(status_filter=status_param)
 
 
 @router.get(
@@ -205,4 +207,41 @@ async def delete_order(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     return {"message": "Order deleted"}
+
+
+@router.patch(
+    "/{order_id}/status",
+    response_model=OrderResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Status transitioned successfully"},
+        400: {"description": "Invalid status transition"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Order not found"},
+    },
+    summary="Transition order status",
+)
+async def update_order_status(
+    order_id: str,
+    request: StatusUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Transition an order's status following the valid state machine.
+
+    Valid transitions:
+    - pending -> confirmed -> shipped -> delivered
+    - pending -> cancelled
+
+    Raises:
+        **400** – invalid transition.
+        **401** – missing / invalid token.
+        **404** – order not found.
+    """
+    try:
+        return await order_service.transition_status(order_id, request.status)
+    except InvalidStatusTransitionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
 

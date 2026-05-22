@@ -17,12 +17,19 @@ class OrderRequest(BaseModel):
     items: list[OrderItem] = Field(..., min_length=1, description="At least one item required")
 
 
+class StatusUpdateRequest(BaseModel):
+    """Payload accepted by PATCH /api/orders/:id/status."""
+
+    status: str = Field(..., description="Target status to transition to")
+
+
 class OrderResponse(BaseModel):
     """Response shape returned by all order endpoints."""
 
     id: str
     items: list[OrderItem]
     total: float = Field(..., description="Auto-calculated sum of price × quantity for all items")
+    status: str = Field(default="pending", description="Order lifecycle status")
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 

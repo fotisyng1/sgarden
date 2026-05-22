@@ -14,6 +14,30 @@ from validators.order_validator import validate_create, validate_update
 
 
 # ---------------------------------------------------------------------------
+# Order status state machine
+# ---------------------------------------------------------------------------
+
+VALID_TRANSITIONS: dict[str, list[str]] = {
+    "pending": ["confirmed", "cancelled"],
+    "confirmed": ["shipped"],
+    "shipped": ["delivered"],
+    "delivered": [],
+    "cancelled": [],
+}
+
+
+class InvalidStatusTransitionError(Exception):
+    """Raised when an order status transition is not allowed."""
+
+    def __init__(self, current: str, target: str) -> None:
+        self.current = current
+        self.target = target
+        super().__init__(
+            f"Invalid status transition from '{current}' to '{target}'"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Serialisation helper
 # ---------------------------------------------------------------------------
 
@@ -26,6 +50,7 @@ def _order_to_response(doc: dict) -> dict:
             for item in doc.get("items", [])
         ],
         "total": doc.get("total", 0.0),
+        "status": doc.get("status", "pending"),
         "createdAt": doc["createdAt"].isoformat() if doc.get("createdAt") else None,
         "updatedAt": doc["updatedAt"].isoformat() if doc.get("updatedAt") else None,
     }
@@ -117,6 +142,7 @@ async def create_order(request: OrderRequest) -> dict:
     doc = {
         "items": [{"productId": i.productId, "quantity": i.quantity} for i in request.items],
         "total": total,
+        "status": "pending",
         "createdAt": now,
         "updatedAt": now,
     }
@@ -125,14 +151,20 @@ async def create_order(request: OrderRequest) -> dict:
     return _order_to_response(doc)
 
 
-async def get_all_orders() -> list[dict]:
-    """Return every order, newest first.
+async def get_all_orders(status_filter: str | None = None) -> list[dict]:
+    """Return every order, newest first. Optionally filter by status.
+
+    Args:
+        status_filter: If provided, only return orders with this status.
 
     Returns:
         List of serialised order dicts.  Empty list when no orders exist.
     """
+    query: dict = {}
+    if status_filter:
+        query["status"] = status_filter
     orders: list[dict] = []
-    async for doc in orders_collection.find().sort("createdAt", -1):
+    async for doc in orders_collection.find(query).sort("createdAt", -1):
         orders.append(_order_to_response(doc))
     return orders
 
@@ -196,3 +228,39 @@ async def delete_order(order_id: str) -> bool:
         return False
     result = await orders_collection.delete_one({"_id": ObjectId(order_id)})
     return result.deleted_count > 0
+
+
+async def transition_status(order_id: str, target_status: str) -> dict | None:
+    """Transition an order's status following the valid state machine.
+
+    Args:
+        order_id: MongoDB ObjectId hex string.
+        target_status: The desired new status.
+
+    Returns:
+        Updated serialised order dict.
+
+    Raises:
+        :class:`InvalidStatusTransitionError`: When the transition is not allowed.
+        :class:`ValueError`: When order is not found.
+    """
+    if not ObjectId.is_valid(order_id):
+        raise ValueError("Order not found")
+
+    doc = await orders_collection.find_one({"_id": ObjectId(order_id)})
+    if doc is None:
+        raise ValueError("Order not found")
+
+    current_status = doc.get("status", "pending")
+    allowed = VALID_TRANSITIONS.get(current_status, [])
+
+    if target_status not in allowed:
+        raise InvalidStatusTransitionError(current_status, target_status)
+
+    await orders_collection.update_one(
+        {"_id": ObjectId(order_id)},
+        {"$set": {"status": target_status, "updatedAt": datetime.utcnow()}},
+    )
+    updated = await orders_collection.find_one({"_id": ObjectId(order_id)})
+    return _order_to_response(updated)  # type: ignore[arg-type]
+

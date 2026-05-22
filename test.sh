@@ -6,12 +6,16 @@
 # Default BASE_URL: http://localhost:4000
 #
 # Each concern lives in its own file under tests/:
-#   helpers.sh          – shared HTTP helpers, runner, auth, cleanup
-#   search_tests.sh     – GET /api/products/search
-#   stats_tests.sh      – GET /api/products/stats
-#   pagination_tests.sh – GET /api/products (pagination & sorting)
-#   validation_tests.sh – POST/PUT /api/products (input validation)
-#   orders_tests.sh     – full CRUD for /api/orders
+#   helpers.sh              – shared HTTP helpers, runner, auth, cleanup
+#   search_tests.sh         – GET /api/products/search
+#   stats_tests.sh          – GET /api/products/stats
+#   pagination_tests.sh     – GET /api/products (pagination & sorting)
+#   validation_tests.sh     – POST/PUT /api/products (input validation)
+#   orders_tests.sh         – full CRUD for /api/orders
+#   stock_tests.sh          – stock management
+#   alerts_tests.sh         – GET /api/alerts, PUT /api/alerts/threshold
+#   order_status_tests.sh   – PATCH /api/orders/:id/status (state machine)
+#   analytics_tests.sh      – GET /api/analytics/sales
 # ---------------------------------------------------------------------------
 
 set -uo pipefail
@@ -37,6 +41,9 @@ source "${SCRIPT_DIR}/tests/pagination_tests.sh"
 source "${SCRIPT_DIR}/tests/validation_tests.sh"
 source "${SCRIPT_DIR}/tests/orders_tests.sh"
 source "${SCRIPT_DIR}/tests/stock_tests.sh"
+source "${SCRIPT_DIR}/tests/alerts_tests.sh"
+source "${SCRIPT_DIR}/tests/order_status_tests.sh"
+source "${SCRIPT_DIR}/tests/analytics_tests.sh"
 
 # ── Run suites ───────────────────────────────────────────────────────────────
 echo -e "\n${BOLD}SGarden API – Integration Tests${RESET}"
@@ -56,6 +63,12 @@ echo ""
 run_orders_tests
 echo ""
 run_stock_tests
+echo ""
+run_alerts_tests
+echo ""
+run_order_status_tests
+echo ""
+run_analytics_tests
 
 # Clean up any resources created during the run.
 cleanup_created
