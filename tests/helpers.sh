@@ -63,6 +63,15 @@ json_delete() {
     -H "Authorization: Bearer ${_AUTH_TOKEN}"
 }
 
+# json_patch <path> <json-body>  – authenticated
+json_patch() {
+  curl -s -w "\n%{http_code}" \
+    -X PATCH "${BASE_URL}${1}" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${_AUTH_TOKEN}" \
+    -d "$2"
+}
+
 # ── Test runner ───────────────────────────────────────────────────────────────
 
 # record <name> <0=pass|1=fail> [reason]
@@ -133,6 +142,7 @@ cleanup_created() {
     json_delete "/api/orders/${id}" > /dev/null
   done
 }
+
 
 
 

@@ -7,7 +7,7 @@ Business logic is fully delegated to :mod:`services.order_service`.
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 
-from exceptions import OrderValidationError
+from exceptions import OrderValidationError, InsufficientStockError
 from models.order import OrderRequest, OrderResponse
 from security.jwt_handler import get_current_user
 import services.order_service as order_service
@@ -75,6 +75,8 @@ async def create_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             content=_validation_error_response(exc),
         )
+    except InsufficientStockError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 

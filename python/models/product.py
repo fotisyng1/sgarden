@@ -3,6 +3,12 @@ from typing import Optional
 from datetime import datetime
 
 
+class StockUpdateRequest(BaseModel):
+    """Payload for PATCH /api/products/:id/stock."""
+
+    stock: int = Field(..., description="New absolute stock value – validated in service layer")
+
+
 class ValidationErrorResponse(BaseModel):
     """Structured 400 response returned when field-level validation fails."""
 
