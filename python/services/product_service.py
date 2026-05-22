@@ -5,9 +5,16 @@ All database interactions and data transformations for products live here.
 
 from bson import ObjectId
 from datetime import datetime
+from typing import Literal
 
 from database import products_collection
-from models.product import ProductRequest, ProductStatsResponse
+from models.product import ProductRequest, ProductStatsResponse, PaginatedProductResponse
+
+# Fields that callers are allowed to sort by.  Checked before hitting the DB
+# so that arbitrary field names cannot be injected into the aggregation pipeline.
+_SORTABLE_FIELDS: frozenset[str] = frozenset(
+    {"name", "price", "stock", "category", "createdAt", "updatedAt"}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +114,63 @@ async def get_product_stats() -> ProductStatsResponse:
 # ---------------------------------------------------------------------------
 # Read operations
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Read operations
+# ---------------------------------------------------------------------------
+
+async def list_products(
+    page: int,
+    limit: int,
+    sort: str,
+    order: Literal["asc", "desc"],
+) -> PaginatedProductResponse:
+    """Return a paginated, sorted slice of the product catalogue.
+
+    Uses a single ``$facet`` aggregation so MongoDB is queried exactly once.
+
+    Args:
+        page:   1-indexed page number.  Pages beyond the last available page
+                return an empty ``data`` array with ``total`` still reflecting
+                the real document count.
+        limit:  Number of documents per page.
+        sort:   MongoDB field name to sort by.  Must be one of
+                ``_SORTABLE_FIELDS``; raises :class:`ValueError` otherwise.
+        order:  ``"asc"`` for ascending, ``"desc"`` for descending.
+
+    Returns:
+        A :class:`~models.product.PaginatedProductResponse` with ``data``,
+        ``page``, ``limit``, and ``total`` populated.
+
+    Raises:
+        :class:`ValueError`: When ``sort`` is not an allowed field name.
+    """
+    if sort not in _SORTABLE_FIELDS:
+        raise ValueError(
+            f"Invalid sort field '{sort}'. Allowed: {sorted(_SORTABLE_FIELDS)}"
+        )
+
+    sort_dir = 1 if order == "asc" else -1
+    skip = (page - 1) * limit
+
+    pipeline = [
+        {"$sort": {sort: sort_dir}},
+        {
+            "$facet": {
+                "data": [{"$skip": skip}, {"$limit": limit}],
+                "total": [{"$count": "count"}],
+            }
+        },
+    ]
+
+    results = await products_collection.aggregate(pipeline).to_list(length=1)
+    facet = results[0] if results else {"data": [], "total": []}
+
+    total: int = facet["total"][0]["count"] if facet["total"] else 0
+    data = [product_to_response(doc) for doc in facet["data"]]
+
+    return PaginatedProductResponse(data=data, page=page, limit=limit, total=total)
+
 
 async def get_all_products() -> list[dict]:
     """Return every product stored in the database.

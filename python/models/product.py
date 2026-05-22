@@ -3,6 +3,15 @@ from typing import Optional
 from datetime import datetime
 
 
+class PaginatedProductResponse(BaseModel):
+    """Paginated envelope returned by ``GET /api/products``."""
+
+    data: list["ProductResponse"] = Field(..., description="Products on the requested page")
+    page: int = Field(..., ge=1, description="Current page number (1-indexed)")
+    limit: int = Field(..., ge=1, description="Maximum items per page")
+    total: int = Field(..., ge=0, description="Total products across all pages")
+
+
 class ProductStatsResponse(BaseModel):
     """Aggregate statistics for the entire product catalogue."""
 

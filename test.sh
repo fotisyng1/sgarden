@@ -271,6 +271,128 @@ assert cat_sum == total, \
 " || return 1
 }
 
+# ─ Pagination / sorting tests ────────────────────────────────────────────────
+
+t_paginate_structure() {
+  local resp status body
+  resp=$(json_get "/api/products" "page=1&limit=5")
+  status=$(tail -1 <<< "$resp")
+  body=$(head -n -1 <<< "$resp")
+
+  [[ "$status" -eq 200 ]] || { echo "Expected 200, got $status"; return 1; }
+  py "
+import sys, json
+r = json.loads('''$body''')
+for field in ('data', 'page', 'limit', 'total'):
+    assert field in r, f'missing field: {field}'
+assert isinstance(r['data'], list),  'data must be an array'
+assert isinstance(r['page'],  int),  'page must be an integer'
+assert isinstance(r['limit'], int),  'limit must be an integer'
+assert isinstance(r['total'], int),  'total must be an integer'
+assert r['page']  == 1, f'expected page=1, got {r[\"page\"]}'
+assert r['limit'] == 5, f'expected limit=5, got {r[\"limit\"]}'
+assert len(r['data']) == 5, f'expected 5 items in data, got {len(r[\"data\"])}'
+" || return 1
+}
+
+t_paginate_no_overlap() {
+  local resp1 resp2 body1 body2
+  resp1=$(json_get "/api/products" "page=1&limit=5")
+  body1=$(head -n -1 <<< "$resp1")
+  resp2=$(json_get "/api/products" "page=2&limit=5")
+  body2=$(head -n -1 <<< "$resp2")
+
+  py "
+import sys, json
+p1 = json.loads('''$body1''')
+p2 = json.loads('''$body2''')
+ids1 = {p['id'] for p in p1['data']}
+ids2 = {p['id'] for p in p2['data']}
+overlap = ids1 & ids2
+assert not overlap, f'pages 1 and 2 share product IDs: {overlap}'
+assert len(ids1) > 0, 'page 1 returned no products'
+assert len(ids2) > 0, 'page 2 returned no products'
+" || return 1
+}
+
+t_sort_price_asc() {
+  local resp status body
+  resp=$(json_get "/api/products" "sort=price&order=asc&limit=100")
+  status=$(tail -1 <<< "$resp")
+  body=$(head -n -1 <<< "$resp")
+
+  [[ "$status" -eq 200 ]] || { echo "Expected 200, got $status"; return 1; }
+  py "
+import sys, json
+r = json.loads('''$body''')
+prices = [p['price'] for p in r['data'] if p.get('price') is not None]
+assert prices == sorted(prices), \
+    f'prices not in ascending order: {prices}'
+" || return 1
+}
+
+t_sort_price_desc() {
+  local resp status body
+  resp=$(json_get "/api/products" "sort=price&order=desc&limit=100")
+  status=$(tail -1 <<< "$resp")
+  body=$(head -n -1 <<< "$resp")
+
+  [[ "$status" -eq 200 ]] || { echo "Expected 200, got $status"; return 1; }
+  py "
+import sys, json
+r = json.loads('''$body''')
+prices = [p['price'] for p in r['data'] if p.get('price') is not None]
+assert prices == sorted(prices, reverse=True), \
+    f'prices not in descending order: {prices}'
+" || return 1
+}
+
+t_sort_name_asc() {
+  local resp status body
+  resp=$(json_get "/api/products" "sort=name&order=asc&limit=100")
+  status=$(tail -1 <<< "$resp")
+  body=$(head -n -1 <<< "$resp")
+
+  [[ "$status" -eq 200 ]] || { echo "Expected 200, got $status"; return 1; }
+  py "
+import sys, json
+r = json.loads('''$body''')
+names = [p['name'] for p in r['data'] if p.get('name') is not None]
+assert names == sorted(names), \
+    f'names not in lexicographic ascending order: {names}'
+" || return 1
+}
+
+t_paginate_total_gt_data() {
+  local resp status body
+  resp=$(json_get "/api/products" "page=1&limit=5")
+  status=$(tail -1 <<< "$resp")
+  body=$(head -n -1 <<< "$resp")
+
+  [[ "$status" -eq 200 ]] || { echo "Expected 200, got $status"; return 1; }
+  py "
+import sys, json
+r = json.loads('''$body''')
+assert r['total'] > len(r['data']), \
+    f'total ({r[\"total\"]}) should be greater than data length ({len(r[\"data\"])})'
+" || return 1
+}
+
+t_paginate_out_of_bounds() {
+  local resp status body
+  resp=$(json_get "/api/products" "page=999&limit=10")
+  status=$(tail -1 <<< "$resp")
+  body=$(head -n -1 <<< "$resp")
+
+  [[ "$status" -eq 200 ]] || { echo "Expected 200, got $status"; return 1; }
+  py "
+import sys, json
+r = json.loads('''$body''')
+assert isinstance(r['data'], list), 'data must be an array'
+assert len(r['data']) == 0, f'expected empty data array, got {len(r[\"data\"])} items'
+" || return 1
+}
+
 # ── run all tests ───────────────────────────────────────────────────────────
 
 echo -e "\n${BOLD}SGarden API – Integration Tests${RESET}"
@@ -291,6 +413,16 @@ run_test "GET /stats → averagePrice is a positive number"   t_stats_average_pr
 run_test "GET /stats → minPrice and maxPrice, max >= min"   t_stats_min_max_price
 run_test "GET /stats → categoryCount is an object"          t_stats_category_count
 run_test "GET /stats → sum(categoryCount) == totalCount"    t_stats_category_sum
+
+echo ""
+echo -e "${BOLD}── Pagination & sorting (/api/products) ───────────────────────────────${RESET}"
+run_test "page=1&limit=5 → data/page/limit/total fields present"  t_paginate_structure
+run_test "page=1 and page=2 return non-overlapping IDs"           t_paginate_no_overlap
+run_test "sort=price&order=asc → prices non-decreasing"           t_sort_price_asc
+run_test "sort=price&order=desc → prices non-increasing"          t_sort_price_desc
+run_test "sort=name&order=asc → names in lexicographic order"     t_sort_name_asc
+run_test "page=1&limit=5 → total > len(data)"                     t_paginate_total_gt_data
+run_test "page=999&limit=10 → 200 with empty data array"          t_paginate_out_of_bounds
 
 # ── summary ─────────────────────────────────────────────────────────────────
 
