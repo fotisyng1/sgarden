@@ -8,7 +8,7 @@ from bson import ObjectId
 from datetime import datetime
 
 from database import orders_collection, products_collection
-from exceptions import OrderValidationError
+from exceptions import OrderValidationError, InsufficientStockError
 from models.order import OrderItem, OrderRequest, OrderResponse
 from validators.order_validator import validate_create, validate_update
 
@@ -32,28 +32,54 @@ def _order_to_response(doc: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Price calculation
+# Stock + price helpers
 # ---------------------------------------------------------------------------
 
-async def _calculate_total(items: list[OrderItem]) -> float:
-    """Look up each product and sum price × quantity across all items.
+async def _prepare_order(items: list[OrderItem]) -> float:
+    """Validate stock availability for every line item and calculate total.
+
+    This is a **read-only** pass – no stock is modified.  Calling code must
+    check all items before invoking :func:`_reduce_stock` so that either
+    *all* stock is reduced or *none* of it is (transactional intent).
 
     Args:
-        items: Line items from the order request.
+        items: Line items from the incoming order request.
 
     Returns:
         Rounded total price (2 decimal places).
 
     Raises:
         :class:`ValueError`: When a referenced product does not exist.
+        :class:`~exceptions.InsufficientStockError`: When any product has less
+            stock than the requested quantity.
     """
     total = 0.0
     for item in items:
         product = await products_collection.find_one({"_id": ObjectId(item.productId)})
         if product is None:
             raise ValueError(f"Product '{item.productId}' not found")
+        available: int = product.get("stock", 0) or 0
+        if available < item.quantity:
+            raise InsufficientStockError(
+                product_name=product.get("name", item.productId),
+                requested=item.quantity,
+                available=available,
+            )
         total += (product.get("price") or 0.0) * item.quantity
     return round(total, 2)
+
+
+async def _reduce_stock(items: list[OrderItem]) -> None:
+    """Deduct each item's quantity from its product's stock.
+
+    Must only be called **after** :func:`_prepare_order` has returned without
+    raising, which guarantees every product has sufficient stock.
+    """
+    for item in items:
+        await products_collection.update_one(
+            {"_id": ObjectId(item.productId)},
+            {"$inc": {"stock": -item.quantity}},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -61,22 +87,32 @@ async def _calculate_total(items: list[OrderItem]) -> float:
 # ---------------------------------------------------------------------------
 
 async def create_order(request: OrderRequest) -> dict:
-    """Validate, calculate total, persist, and return the new order.
+    """Validate, check stock, calculate total, reduce stock, and persist the order.
+
+    The stock check and deduction follow a two-pass strategy:
+
+    1. **Read pass** (:func:`_prepare_order`) – verify every product exists and
+       has sufficient stock.  No writes occur.  If *any* product fails, the
+       entire operation is aborted.
+    2. **Write pass** (:func:`_reduce_stock`) – deduct quantities only after
+       every item has been validated, ensuring atomicity at the application layer.
 
     Args:
         request: Incoming order payload with ``items``.
 
     Returns:
-        Serialised order dict including auto-generated ``id``, ``total``,
-        and timestamp fields.
+        Serialised order dict.
 
     Raises:
         :class:`~exceptions.OrderValidationError`: On invalid payload.
+        :class:`~exceptions.InsufficientStockError`: When any product has
+            insufficient stock (no stock is modified).
         :class:`ValueError`: When a referenced product does not exist.
     """
     validate_create(request)
+    total = await _prepare_order(request.items)  # raises before any writes if stock fails
+    await _reduce_stock(request.items)
 
-    total = await _calculate_total(request.items)
     now = datetime.utcnow()
     doc = {
         "items": [{"productId": i.productId, "quantity": i.quantity} for i in request.items],
@@ -132,7 +168,8 @@ async def update_order(order_id: str, request: OrderRequest) -> dict | None:
     if not ObjectId.is_valid(order_id):
         return None
 
-    total = await _calculate_total(request.items)
+    # Recalculate total using current product prices (stock not adjusted on update).
+    total = await _prepare_order(request.items)
     update_fields = {
         "items": [{"productId": i.productId, "quantity": i.quantity} for i in request.items],
         "total": total,

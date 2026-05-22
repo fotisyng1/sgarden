@@ -36,6 +36,7 @@ source "${SCRIPT_DIR}/tests/stats_tests.sh"
 source "${SCRIPT_DIR}/tests/pagination_tests.sh"
 source "${SCRIPT_DIR}/tests/validation_tests.sh"
 source "${SCRIPT_DIR}/tests/orders_tests.sh"
+source "${SCRIPT_DIR}/tests/stock_tests.sh"
 
 # ── Run suites ───────────────────────────────────────────────────────────────
 echo -e "\n${BOLD}SGarden API – Integration Tests${RESET}"
@@ -53,6 +54,8 @@ acquire_token
 run_validation_tests
 echo ""
 run_orders_tests
+echo ""
+run_stock_tests
 
 # Clean up any resources created during the run.
 cleanup_created

@@ -14,6 +14,7 @@ from models.product import (
     ProductStatsResponse,
     PaginatedProductResponse,
     ValidationErrorResponse,
+    StockUpdateRequest,
 )
 from exceptions import ProductValidationError
 from security.jwt_handler import get_current_user
@@ -301,6 +302,51 @@ async def update_product(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
+
+
+@router.patch(
+    "/{product_id}/stock",
+    response_model=ProductResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Stock updated successfully"},
+        400: {"model": ValidationErrorResponse, "description": "Negative stock value rejected"},
+        401: {"description": "Unauthorized – missing or invalid JWT token"},
+        404: {"description": "Product not found"},
+    },
+    summary="Set a product's stock level",
+)
+async def update_product_stock(
+    product_id: str,
+    request: StockUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Directly set a product's stock to an absolute value.
+
+    Requires a valid Bearer JWT token.
+
+    Args:
+        product_id: MongoDB ObjectId hex string (path parameter).
+        request:    ``{ "stock": <non-negative integer> }``
+
+    Returns:
+        The full updated product object.
+
+    Raises:
+        **400 Bad Request** – ``stock`` is negative.
+        **401 Unauthorized** – missing / invalid token.
+        **404 Not Found** – product does not exist.
+    """
+    try:
+        product = await product_service.update_product_stock(product_id, request)
+    except ProductValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=_validation_error_response(exc),
+        )
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     return product

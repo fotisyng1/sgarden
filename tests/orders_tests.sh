@@ -7,14 +7,26 @@ _ORDER_PRODUCT_ID=""
 _ORDER_PRODUCT_PRICE=""
 _TEST_ORDER_ID=""   # shared across dependent tests within this suite
 
-# resolve_order_product – fetches the first product's id and price.
+# Pick a well-stocked seed product (stock >= 10) so test-created products
+# with minimal stock (e.g. __test_product__ with stock=1) are never chosen.
 _resolve_order_product() {
   local resp
-  resp=$(curl -s "${BASE_URL}/api/products?limit=1&sort=price&order=asc")
-  _ORDER_PRODUCT_ID=$(python3 -c "import json; d=json.loads('''$resp'''); print(d['data'][0]['id'])")
-  _ORDER_PRODUCT_PRICE=$(python3 -c "import json; d=json.loads('''$resp'''); print(d['data'][0]['price'])")
+  resp=$(curl -s "${BASE_URL}/api/products?limit=20&sort=stock&order=desc")
+  _ORDER_PRODUCT_ID=$(echo "$resp" | python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+candidates = [p for p in data['data'] if (p.get('stock') or 0) >= 10]
+if not candidates: sys.exit(1)
+print(candidates[0]['id'])
+")
+  _ORDER_PRODUCT_PRICE=$(echo "$resp" | python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+candidates = [p for p in data['data'] if (p.get('stock') or 0) >= 10]
+print(candidates[0]['price'])
+")
   if [[ -z "$_ORDER_PRODUCT_ID" || -z "$_ORDER_PRODUCT_PRICE" ]]; then
-    echo "ERROR: could not resolve a test product" >&2
+    echo "ERROR: could not find a product with stock >= 10" >&2
     return 1
   fi
 }
@@ -144,5 +156,4 @@ run_orders_tests() {
   run_test        "GET /000000000000000000000000 → 404"             t_orders_not_found
   run_test        "POST without token → 401 or 403"                 t_orders_unauthenticated
 }
-
 

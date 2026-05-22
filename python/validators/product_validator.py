@@ -17,7 +17,7 @@ Design principles applied here:
 from collections.abc import Callable
 
 from exceptions import ProductValidationError
-from models.product import ProductRequest
+from models.product import ProductRequest, StockUpdateRequest
 
 # ---------------------------------------------------------------------------
 # Domain constants
@@ -110,6 +110,23 @@ def validate_update(request: ProductRequest) -> None:
     _run_rules(_UPDATE_RULES, request)
 
 
+def validate_stock_update(request: StockUpdateRequest) -> None:
+    """Validate a stock-only update request.
+
+    Stock must be a non-negative integer (zero is allowed to clear stock).
+
+    Args:
+        request: Payload containing the new ``stock`` value.
+
+    Raises:
+        :class:`~exceptions.ProductValidationError`: When ``stock`` is negative.
+    """
+    if request.stock < 0:
+        raise ProductValidationError(
+            {"stock": "stock must be a non-negative integer (zero or greater)"}
+        )
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -122,4 +139,6 @@ def _run_rules(rules: tuple[_Rule, ...], request: ProductRequest) -> None:
         rule(request, errors)
     if errors:
         raise ProductValidationError(errors)
+
+
 

@@ -9,8 +9,8 @@ from typing import Literal
 
 from database import products_collection
 from exceptions import ProductValidationError  # noqa: F401 – re-exported for callers
-from models.product import ProductRequest, ProductStatsResponse, PaginatedProductResponse
-from validators.product_validator import validate_create, validate_update
+from models.product import ProductRequest, ProductStatsResponse, PaginatedProductResponse, StockUpdateRequest
+from validators.product_validator import validate_create, validate_update, validate_stock_update
 
 # Fields that callers are allowed to sort by.  Checked before hitting the DB
 # so that arbitrary field names cannot be injected into the aggregation pipeline.
@@ -360,4 +360,37 @@ async def delete_product(product_id: str) -> bool:
         return False
     result = await products_collection.delete_one({"_id": ObjectId(product_id)})
     return result.deleted_count > 0
+
+
+async def update_product_stock(product_id: str, request: StockUpdateRequest) -> dict | None:
+    """Set a product's stock to an explicit absolute value.
+
+    Validates that the new stock is non-negative before touching the database.
+
+    Args:
+        product_id: Hex string representation of the MongoDB ``_id``.
+        request:    Payload with ``stock`` field to apply.
+
+    Returns:
+        The updated product as a serialised dict, or ``None`` when the product
+        does not exist or the id is invalid.
+
+    Raises:
+        :class:`~exceptions.ProductValidationError`: When ``stock`` is negative.
+    """
+    validate_stock_update(request)
+
+    if not ObjectId.is_valid(product_id):
+        return None
+
+    result = await products_collection.update_one(
+        {"_id": ObjectId(product_id)},
+        {"$set": {"stock": request.stock, "updatedAt": datetime.utcnow()}},
+    )
+    if result.matched_count == 0:
+        return None
+
+    product = await products_collection.find_one({"_id": ObjectId(product_id)})
+    return product_to_response(product)  # type: ignore[arg-type]
+
 
