@@ -1,12 +1,28 @@
 name: API Integration Tests
 
+# Trigger on every push and pull-request across all branches.
 on:
   push:
     branches: ["**"]
   pull_request:
     branches: ["**"]
 
+# ---------------------------------------------------------------------------
+# Shared configuration – Dependency Inversion: jobs consume env vars rather
+# than hardcoding values, so a single change here propagates everywhere.
+# ---------------------------------------------------------------------------
+env:
+  DATABASE_URL: mongodb://localhost:27017/sgarden
+  SERVER_PORT: 4000
+  SERVER_SECRET: sgarden-secret-key
+  SERVER_URL: http://localhost:4000
+  HEALTH_TIMEOUT: 30
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Single Responsibility: this job owns Python/FastAPI integration testing.
+  # Open/Closed: add new test scenarios to test.sh without touching this file.
+  # ---------------------------------------------------------------------------
   python-tests:
     name: Python – FastAPI integration tests
     runs-on: ubuntu-latest
@@ -22,11 +38,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    env:
-      DATABASE_URL: mongodb://localhost:27017/sgarden
-      PORT: 4000
-      SERVER_SECRET: sgarden-secret-key
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,32 +49,34 @@ jobs:
           cache: pip
           cache-dependency-path: python/requirements.txt
 
-      - name: Install dependencies
+      # Single Responsibility: this step only installs; it does not start anything.
+      - name: Install Python dependencies
         working-directory: python
         run: pip install -r requirements.txt
 
+      # Single Responsibility: this step only starts the server.
       - name: Start FastAPI server
         working-directory: python
+        env:
+          PORT: ${{ env.SERVER_PORT }}
         run: |
-          uvicorn main:app --host 0.0.0.0 --port 4000 &
+          uvicorn main:app --host 0.0.0.0 --port "$PORT" &
           echo "SERVER_PID=$!" >> "$GITHUB_ENV"
 
-      - name: Wait for server to be ready
+      # Single Responsibility: delegated to wait-for-health.sh so the logic
+      # lives in version-controlled code, not an inline heredoc.
+      - name: Wait for server to be healthy
         run: |
-          echo "Waiting for server on port 4000..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:4000/api/health > /dev/null 2>&1; then
-              echo "Server ready after ${i}s"; exit 0
-            fi
-            sleep 1
-          done
-          echo "Server did not start in time" && exit 1
+          chmod +x wait-for-health.sh
+          ./wait-for-health.sh "$SERVER_URL" "$HEALTH_TIMEOUT"
 
+      # Single Responsibility: this step only executes tests.
       - name: Run integration tests
         run: |
           chmod +x test.sh
-          ./test.sh http://localhost:4000
+          ./test.sh "$SERVER_URL"
 
+      # Always runs – ensures the background server is stopped even on failure.
       - name: Stop server
         if: always()
         run: kill "$SERVER_PID" 2>/dev/null || true

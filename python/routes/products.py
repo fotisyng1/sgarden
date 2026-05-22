@@ -7,11 +7,25 @@ calls and translates service results into the appropriate HTTP responses.
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status, Depends
-from models.product import ProductRequest, ProductResponse, ProductStatsResponse, PaginatedProductResponse
+from fastapi.responses import JSONResponse
+from models.product import (
+    ProductRequest,
+    ProductResponse,
+    ProductStatsResponse,
+    PaginatedProductResponse,
+    ValidationErrorResponse,
+)
+from exceptions import ProductValidationError
 from security.jwt_handler import get_current_user
 import services.product_service as product_service
 
 router = APIRouter(prefix="/api/products", tags=["Products"])
+
+
+def _validation_error_response(exc: ProductValidationError) -> dict:
+    """Translate a domain validation error into the standard 400 response body."""
+    return {"message": "Validation failed", "errors": exc.errors}
+
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +209,7 @@ async def get_product_by_id(product_id: str) -> dict:
     status_code=status.HTTP_201_CREATED,
     responses={
         201: {"description": "Product created successfully"},
+        400: {"model": ValidationErrorResponse, "description": "Validation failed – see errors object for field-level details"},
         401: {"description": "Unauthorized – missing or invalid JWT token"},
     },
     summary="Create a new product",
@@ -207,18 +222,31 @@ async def create_product(
 
     Requires a valid Bearer JWT token in the ``Authorization`` header.
 
+    **Validation rules:**
+
+    - ``name`` – required, must be a non-empty string.
+    - ``price`` – if provided, must be **> 0** (zero and negatives are rejected).
+    - ``category`` – if provided, must be one of
+      ``Electronics``, ``Accessories``, ``Storage``, ``Networking``.
+
     Args:
-        request: Product payload containing ``name``, ``description``,
-                 ``category``, ``price``, and optional ``stock`` count.
+        request: Product payload.
 
     Returns:
-        The newly created product object, including its generated ``id`` and
-        ``createdAt`` / ``updatedAt`` timestamps.
+        The newly created product object with ``id``, ``createdAt``, and
+        ``updatedAt`` populated.
 
     Raises:
-        **401 Unauthorized** – when the request carries no valid token.
+        **400 Bad Request** – ``{"message": "...", "errors": {"field": "reason"}}``
+        **401 Unauthorized** – missing or invalid token.
     """
-    return await product_service.create_product(request)
+    try:
+        return await product_service.create_product(request)
+    except ProductValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=_validation_error_response(exc),
+        )
 
 
 @router.put(
@@ -227,7 +255,7 @@ async def create_product(
     status_code=status.HTTP_200_OK,
     responses={
         200: {"description": "Product updated successfully"},
-        400: {"description": "Bad request – no updatable fields were provided"},
+        400: {"model": ValidationErrorResponse, "description": "Validation failed – see errors object for field-level details"},
         401: {"description": "Unauthorized – missing or invalid JWT token"},
         404: {"description": "Product not found"},
     },
@@ -240,25 +268,36 @@ async def update_product(
 ) -> dict:
     """Partially update a product.
 
-    Only fields that are explicitly set in the request body are written to the
+    Only fields explicitly set in the request body are written to the
     database; omitted fields retain their current values.
 
     Requires a valid Bearer JWT token in the ``Authorization`` header.
 
+    **Validation rules (applied to any field that is present):**
+
+    - ``name`` – if provided, must not be blank.
+    - ``price`` – if provided, must be **> 0**.
+    - ``category`` – if provided, must be a known category.
+
     Args:
-        product_id: MongoDB ObjectId hex string, supplied as a path parameter.
+        product_id: MongoDB ObjectId hex string (path parameter).
         request:    Partial product payload.  At least one field must be set.
 
     Returns:
         The full updated product object.
 
     Raises:
-        **400 Bad Request** – when the request body contains no fields to update.
-        **401 Unauthorized** – when the request carries no valid token.
-        **404 Not Found**    – when no product with the given id exists.
+        **400 Bad Request** – validation failed or no fields supplied.
+        **401 Unauthorized** – missing or invalid token.
+        **404 Not Found**    – product does not exist.
     """
     try:
         product = await product_service.update_product(product_id, request)
+    except ProductValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=_validation_error_response(exc),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

@@ -8,7 +8,9 @@ from datetime import datetime
 from typing import Literal
 
 from database import products_collection
+from exceptions import ProductValidationError  # noqa: F401 – re-exported for callers
 from models.product import ProductRequest, ProductStatsResponse, PaginatedProductResponse
+from validators.product_validator import validate_create, validate_update
 
 # Fields that callers are allowed to sort by.  Checked before hitting the DB
 # so that arbitrary field names cannot be injected into the aggregation pipeline.
@@ -257,13 +259,22 @@ async def search_products(
 async def create_product(request: ProductRequest) -> dict:
     """Persist a new product document and return its serialised representation.
 
+    Validation is applied before any database interaction so that invalid
+    payloads never reach the storage layer.
+
     Args:
         request: Validated product payload from the request body.
 
     Returns:
-        The newly created product as a serialised dict, including the
-        auto-generated ``id`` and timestamp fields.
+        The newly created product as a serialised dict.
+
+    Raises:
+        :class:`~exceptions.ProductValidationError`: When the payload violates
+            one or more business rules (e.g. missing name, non-positive price,
+            unknown category).
     """
+    validate_create(request)
+
     now = datetime.utcnow()
     product_doc = {
         "name": request.name,
@@ -282,6 +293,9 @@ async def create_product(request: ProductRequest) -> dict:
 async def update_product(product_id: str, request: ProductRequest) -> dict | None:
     """Apply a partial update to an existing product.
 
+    Validation runs before the database is queried so that malformed payloads
+    are rejected immediately with field-level errors.
+
     Only fields explicitly set in *request* (i.e. not ``None``) are written to
     the database; all other fields are left untouched.
 
@@ -295,8 +309,12 @@ async def update_product(product_id: str, request: ProductRequest) -> dict | Non
         - no document with that id exists.
 
     Raises:
+        :class:`~exceptions.ProductValidationError`: When the payload violates
+            one or more business rules.
         :class:`ValueError`: When *request* contains no fields to update.
     """
+    validate_update(request)
+
     if not ObjectId.is_valid(product_id):
         return None
 

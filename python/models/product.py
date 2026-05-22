@@ -3,6 +3,15 @@ from typing import Optional
 from datetime import datetime
 
 
+class ValidationErrorResponse(BaseModel):
+    """Structured 400 response returned when field-level validation fails."""
+
+    message: str = Field(..., description="Human-readable summary of the failure")
+    errors: dict[str, str] = Field(
+        ..., description="Mapping of field name → error description"
+    )
+
+
 class PaginatedProductResponse(BaseModel):
     """Paginated envelope returned by ``GET /api/products``."""
 
