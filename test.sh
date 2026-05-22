@@ -17,6 +17,8 @@ BASE_URL="${1:-http://localhost:4000}"
 PASS=0
 FAIL=0
 RESULTS=()
+_AUTH_TOKEN=""
+_CREATED_IDS=()  # IDs of products created during tests – cleaned up at exit
 
 # ── colours ────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -28,11 +30,61 @@ RESET='\033[0m'
 # ── helpers ────────────────────────────────────────────────────────────────
 
 # json_get <path> [query-string]
-# Performs a GET request and prints "<status_code> <body>" to stdout.
+# Performs a GET request and prints "<body>\n<status_code>" to stdout.
 json_get() {
   local url="${BASE_URL}${1}"
   [[ -n "$2" ]] && url="${url}?${2}"
   curl -s -w "\n%{http_code}" "$url"
+}
+
+# json_post <path> <json-body>
+# Authenticated POST; uses _AUTH_TOKEN.
+json_post() {
+  curl -s -w "\n%{http_code}" \
+    -X POST "${BASE_URL}${1}" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${_AUTH_TOKEN}" \
+    -d "$2"
+}
+
+# json_put <path> <json-body>
+# Authenticated PUT; uses _AUTH_TOKEN.
+json_put() {
+  curl -s -w "\n%{http_code}" \
+    -X PUT "${BASE_URL}${1}" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${_AUTH_TOKEN}" \
+    -d "$2"
+}
+
+# json_delete <path>
+# Authenticated DELETE; uses _AUTH_TOKEN.
+json_delete() {
+  curl -s -w "\n%{http_code}" \
+    -X DELETE "${BASE_URL}${1}" \
+    -H "Authorization: Bearer ${_AUTH_TOKEN}"
+}
+
+# acquire_token
+# Logs in as the seed admin user and stores the JWT in _AUTH_TOKEN.
+# Called once before the write-endpoint test sections run.
+acquire_token() {
+  _AUTH_TOKEN=$(curl -s -X POST "${BASE_URL}/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"admin123"}' \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
+  if [[ -z "$_AUTH_TOKEN" ]]; then
+    echo -e "${RED}ERROR: could not acquire auth token – is the server seeded?${RESET}" >&2
+    exit 1
+  fi
+}
+
+# cleanup_created
+# Deletes any products created during the test run so the DB stays clean.
+cleanup_created() {
+  for id in "${_CREATED_IDS[@]}"; do
+    json_delete "/api/products/${id}" > /dev/null
+  done
 }
 
 # Python is used only for inline JSON arithmetic / key-checks; every modern
@@ -393,6 +445,100 @@ assert len(r['data']) == 0, f'expected empty data array, got {len(r[\"data\"])} 
 " || return 1
 }
 
+# ─ Validation tests ──────────────────────────────────────────────────────────
+
+# Helper: assert a response is 400 with an errors object containing the given key.
+_assert_validation_error() {
+  local status="$1" body="$2" field="$3"
+  [[ "$status" -eq 400 ]] || { echo "Expected 400, got $status"; return 1; }
+  py "
+import sys, json
+b = json.loads('''$body''')
+assert 'errors' in b, f'missing top-level errors object: {b}'
+assert isinstance(b['errors'], dict), f'errors must be an object, got {type(b[\"errors\"]).__name__}'
+assert '${field}' in b['errors'], f'errors.${field} not present; got keys: {list(b[\"errors\"].keys())}'
+assert isinstance(b['errors']['${field}'], str), f'errors.${field} must be a string'
+" || return 1
+}
+
+t_validate_missing_name() {
+  local resp status body
+  resp=$(json_post "/api/products" '{"price":9.99,"category":"Electronics"}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  _assert_validation_error "$status" "$body" "name"
+}
+
+t_validate_negative_price() {
+  local resp status body
+  resp=$(json_post "/api/products" '{"name":"Test","price":-5,"category":"Electronics"}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  _assert_validation_error "$status" "$body" "price"
+}
+
+t_validate_zero_price() {
+  local resp status body
+  resp=$(json_post "/api/products" '{"name":"Test","price":0,"category":"Electronics"}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  _assert_validation_error "$status" "$body" "price"
+}
+
+t_validate_invalid_category() {
+  local resp status body
+  resp=$(json_post "/api/products" '{"name":"Test","price":9.99,"category":"InvalidCategory"}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  _assert_validation_error "$status" "$body" "category"
+}
+
+t_validate_update_negative_price() {
+  local resp status body
+  # Use any existing product – borrow first id from the catalogue
+  local first_id
+  first_id=$(curl -s "${BASE_URL}/api/products?limit=1" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
+  resp=$(json_put "/api/products/${first_id}" '{"price":-10}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  _assert_validation_error "$status" "$body" "price"
+}
+
+t_validate_errors_structure() {
+  local resp status body
+  # Send multiple bad fields at once – both name and price must appear in errors.
+  resp=$(json_post "/api/products" '{"price":-1,"category":"InvalidCategory"}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  [[ "$status" -eq 400 ]] || { echo "Expected 400, got $status"; return 1; }
+  py "
+import sys, json
+b = json.loads('''$body''')
+assert 'errors' in b, 'missing errors object'
+for key, val in b['errors'].items():
+    assert isinstance(key, str), f'error key must be str: {key}'
+    assert isinstance(val, str), f'error value must be str for key {key}: {val}'
+" || return 1
+}
+
+t_validate_valid_post() {
+  local resp status body created_id
+  resp=$(json_post "/api/products" '{"name":"__test_product__","price":1.99,"category":"Storage","stock":1}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  [[ "$status" -eq 201 ]] || { echo "Expected 201, got $status; body: $body"; return 1; }
+  py "
+import sys, json
+p = json.loads('''$body''')
+assert 'id' in p and p['id'], 'created product must have an id'
+assert p['name'] == '__test_product__', f'unexpected name: {p.get(\"name\")}'
+" || return 1
+  # Capture the id so we can clean up after the suite
+  created_id=$(py "import json; print(json.loads('''$body''')['id'])")
+  [[ -n "$created_id" ]] && _CREATED_IDS+=("$created_id")
+}
+
+t_validate_update_not_found() {
+  local resp status body
+  resp=$(json_put "/api/products/000000000000000000000000" '{"price":9.99}')
+  status=$(tail -1 <<< "$resp"); body=$(head -n -1 <<< "$resp")
+  [[ "$status" -eq 404 ]] || { echo "Expected 404, got $status; body: $body"; return 1; }
+}
+
 # ── run all tests ───────────────────────────────────────────────────────────
 
 echo -e "\n${BOLD}SGarden API – Integration Tests${RESET}"
@@ -423,6 +569,20 @@ run_test "sort=price&order=desc → prices non-increasing"          t_sort_price
 run_test "sort=name&order=asc → names in lexicographic order"     t_sort_name_asc
 run_test "page=1&limit=5 → total > len(data)"                     t_paginate_total_gt_data
 run_test "page=999&limit=10 → 200 with empty data array"          t_paginate_out_of_bounds
+
+echo ""
+echo -e "${BOLD}── Validation (/api/products POST & PUT) ──────────────────────────────${RESET}"
+acquire_token
+run_test "POST missing name → 400 with errors.name"               t_validate_missing_name
+run_test "POST price=-5 → 400 with errors.price"                  t_validate_negative_price
+run_test "POST price=0 → 400 with errors.price"                   t_validate_zero_price
+run_test "POST invalid category → 400 with errors.category"       t_validate_invalid_category
+run_test "PUT price=-10 → 400 with errors.price"                  t_validate_update_negative_price
+run_test "errors object has string values for all failing fields"  t_validate_errors_structure
+run_test "POST valid payload → 201 with created product"          t_validate_valid_post
+run_test "PUT /products/000000000000000000000000 → 404"           t_validate_update_not_found
+
+cleanup_created
 
 # ── summary ─────────────────────────────────────────────────────────────────
 
