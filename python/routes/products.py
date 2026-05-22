@@ -5,7 +5,7 @@ calls and translates service results into the appropriate HTTP responses.
 """
 
 from fastapi import APIRouter, HTTPException, Query, status, Depends
-from models.product import ProductRequest, ProductResponse
+from models.product import ProductRequest, ProductResponse, ProductStatsResponse
 from security.jwt_handler import get_current_user
 import services.product_service as product_service
 
@@ -35,6 +35,51 @@ async def get_all_products() -> list[dict]:
         catalogue contains no products.
     """
     return await product_service.get_all_products()
+
+
+@router.get(
+    "/stats",
+    response_model=ProductStatsResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "Aggregate statistics for the product catalogue"},
+    },
+    summary="Get product catalogue statistics",
+)
+async def get_product_stats() -> ProductStatsResponse:
+    """Return aggregate metrics computed over the entire product catalogue.
+
+    No authentication is required.
+
+    The response shape is:
+
+    ```json
+    {
+      "totalCount": 15,
+      "averagePrice": 45.52,
+      "minPrice": 8.99,
+      "maxPrice": 129.99,
+      "categoryCount": {
+        "Electronics": 5,
+        "Accessories": 6,
+        "Storage": 2,
+        "Networking": 2
+      }
+    }
+    ```
+
+    **Guarantees:**
+
+    - ``sum(categoryCount.values()) == totalCount``
+    - ``minPrice <= averagePrice <= maxPrice`` when ``totalCount > 0``
+    - All fields are present even when the catalogue is empty
+      (``totalCount=0``, ``averagePrice=0.0``, ``minPrice/maxPrice=null``,
+      ``categoryCount={}``)
+
+    Returns:
+        A :class:`~models.product.ProductStatsResponse` object.
+    """
+    return await product_service.get_product_stats()
 
 
 @router.get(

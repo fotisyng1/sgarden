@@ -3,6 +3,18 @@ from typing import Optional
 from datetime import datetime
 
 
+class ProductStatsResponse(BaseModel):
+    """Aggregate statistics for the entire product catalogue."""
+
+    totalCount: int = Field(..., description="Total number of products")
+    averagePrice: float = Field(..., description="Mean price across all products")
+    minPrice: float | None = Field(None, description="Cheapest product price")
+    maxPrice: float | None = Field(None, description="Most expensive product price")
+    categoryCount: dict[str, int] = Field(
+        ..., description="Number of products per category, e.g. {Electronics: 5}"
+    )
+
+
 class ProductInDB(BaseModel):
     id: Optional[str] = Field(None, alias="_id")
     name: str
