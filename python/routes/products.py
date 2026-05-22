@@ -4,8 +4,10 @@ Thin HTTP layer that maps incoming requests to :mod:`services.product_service`
 calls and translates service results into the appropriate HTTP responses.
 """
 
+from typing import Annotated, Literal
+
 from fastapi import APIRouter, HTTPException, Query, status, Depends
-from models.product import ProductRequest, ProductResponse, ProductStatsResponse
+from models.product import ProductRequest, ProductResponse, ProductStatsResponse, PaginatedProductResponse
 from security.jwt_handler import get_current_user
 import services.product_service as product_service
 
@@ -18,23 +20,59 @@ router = APIRouter(prefix="/api/products", tags=["Products"])
 
 @router.get(
     "",
-    response_model=list[ProductResponse],
+    response_model=PaginatedProductResponse,
     status_code=status.HTTP_200_OK,
     responses={
-        200: {"description": "List of all products"},
+        200: {"description": "Paginated product listing"},
+        400: {"description": "Bad request – invalid sort field"},
     },
-    summary="Retrieve all products",
+    summary="List products with pagination and sorting",
 )
-async def get_all_products() -> list[dict]:
-    """Return every product in the catalogue.
+async def list_products(
+    page: Annotated[int, Query(ge=1, description="1-indexed page number")] = 1,
+    limit: Annotated[int, Query(ge=1, le=100, description="Items per page (max 100)")] = 10,
+    sort: Annotated[str, Query(description="Field to sort by: name, price, stock, category, createdAt, updatedAt")] = "createdAt",
+    order: Annotated[Literal["asc", "desc"], Query(description="Sort direction")] = "asc",
+) -> PaginatedProductResponse:
+    """Return a paginated, sorted slice of the product catalogue.
 
-    No authentication is required.
+    All parameters are optional and default to page 1, 10 items per page,
+    sorted by ``createdAt`` ascending.
+
+    **Pagination:**
+
+    - **page** – 1-indexed.  Requesting a page beyond the last available
+      page returns an empty ``data`` array with ``total`` still reflecting
+      the real document count.
+    - **limit** – capped at 100.
+
+    **Sorting:**
+
+    - **sort** – one of ``name``, ``price``, ``stock``, ``category``,
+      ``createdAt``, ``updatedAt``.
+    - **order** – ``asc`` (default) or ``desc``.
+
+    **Response shape:**
+
+    ```json
+    {
+      "data":  [...],
+      "page":  1,
+      "limit": 10,
+      "total": 15
+    }
+    ```
 
     Returns:
-        A JSON array of product objects.  Returns an empty array when the
-        catalogue contains no products.
+        A :class:`~models.product.PaginatedProductResponse`.
+
+    Raises:
+        **400 Bad Request** – when ``sort`` is not an allowed field name.
     """
-    return await product_service.get_all_products()
+    try:
+        return await product_service.list_products(page=page, limit=limit, sort=sort, order=order)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.get(
