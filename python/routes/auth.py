@@ -1,11 +1,15 @@
-from fastapi import APIRouter, HTTPException, status
-from models.user import RegisterRequest, LoginRequest, AuthResponse
-from database import users_collection
-from security.jwt_handler import create_token
-import bcrypt
-from bson import ObjectId
+import logging
 from datetime import datetime
 
+import bcrypt
+from bson import ObjectId
+from fastapi import APIRouter, HTTPException, status
+
+from database import users_collection
+from models.user import RegisterRequest, LoginRequest, AuthResponse
+from security.jwt_handler import create_token
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
@@ -50,7 +54,7 @@ async def register(request: RegisterRequest):
     user_id = str(result.inserted_id)
 
     token = create_token(user_id, request.username, "user")
-    print(f"User registered: {request.username}")
+    logger.info("User registered: %s", request.username)
     return AuthResponse(token=token, username=request.username, role="user")
 
 
@@ -77,5 +81,5 @@ async def login(request: LoginRequest):
 
     user_id = str(user["_id"])
     token = create_token(user_id, user["username"], user["role"])
-    print(f"User logged in: {user['username']}")
+    logger.info("User logged in: %s", user["username"])
     return AuthResponse(token=token, username=user["username"], role=user["role"])
