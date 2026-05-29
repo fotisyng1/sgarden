@@ -56,4 +56,3 @@ async def get_alerts() -> list[dict]:
             "severity": _compute_severity(stock, threshold),
         })
     return alerts
-

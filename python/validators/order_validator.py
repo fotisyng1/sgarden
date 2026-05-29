@@ -76,4 +76,3 @@ def _run_rules(rules: tuple[_Rule, ...], request: OrderRequest) -> None:
         rule(request, errors)
     if errors:
         raise OrderValidationError(errors)
-

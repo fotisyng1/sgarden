@@ -263,4 +263,3 @@ async def transition_status(order_id: str, target_status: str) -> dict | None:
     )
     updated = await orders_collection.find_one({"_id": ObjectId(order_id)})
     return _order_to_response(updated)  # type: ignore[arg-type]
-
