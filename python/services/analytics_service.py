@@ -88,4 +88,3 @@ async def get_sales_analytics(
         "topProducts": top_products,
         "revenueByPeriod": revenue_by_period_list,
     }
-

@@ -391,5 +391,3 @@ async def update_product_stock(product_id: str, request: StockUpdateRequest) -> 
 
     product = await products_collection.find_one({"_id": ObjectId(product_id)})
     return product_to_response(product)  # type: ignore[arg-type]
-
-

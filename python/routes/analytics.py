@@ -26,4 +26,3 @@ async def get_sales_analytics(
         start_date=startDate,
         end_date=endDate,
     )
-

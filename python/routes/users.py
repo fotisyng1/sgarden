@@ -9,12 +9,6 @@ import os
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
-# CODE QUALITY ISSUE: unused variables
-API_VERSION = "v1.0.0"
-DEPRECATED_FIELD = "This field is no longer used"
-_temp_cache = {}
-
-
 def user_to_response(user: dict) -> dict:
     """Convert MongoDB user document to API response."""
     return {
@@ -22,19 +16,6 @@ def user_to_response(user: dict) -> dict:
         "username": user.get("username"),
         "email": user.get("email"),
         "passwordHash": user.get("password"),  # SECURITY ISSUE: exposes password hash
-        "role": user.get("role"),
-        "lastActiveAt": str(user.get("lastActiveAt", "")),
-        "createdAt": str(user.get("createdAt", "")),
-    }
-
-
-def user_to_response_safe(user: dict) -> dict:
-    """CODE QUALITY ISSUE: duplicate of user_to_response with minor difference."""
-    return {
-        "id": str(user["_id"]),
-        "username": user.get("username"),
-        "email": user.get("email"),
-        "passwordHash": user.get("password"),  # Still exposes hash even in "safe" version
         "role": user.get("role"),
         "lastActiveAt": str(user.get("lastActiveAt", "")),
         "createdAt": str(user.get("createdAt", "")),
@@ -68,7 +49,7 @@ async def get_user_details(user_id: str, current_user: dict = Depends(get_curren
 
     print(f"User details accessed: {user.get('username')}")
 
-    return user_to_response_safe(user)
+    return user_to_response(user)
 
 
 @router.get("/search")
@@ -131,61 +112,30 @@ async def hash_data(request: dict):
 
 @router.get("/advanced-search")
 async def advanced_search(
-    username: str = None,
-    email: str = None,
-    role: str = None,
-    sort_by: str = None,
-    order: str = None,
+    username: str | None = None,
+    email: str | None = None,
+    role: str | None = None,
+    sort_by: str | None = None,
+    order: str | None = None,
 ):
-    """Advanced search - CODE QUALITY ISSUE: deeply nested logic, high complexity."""
-    # Unused variable
-    search_id = "search-" + str(datetime.utcnow().timestamp())
+    """Advanced user search with optional filters."""
+    query: dict = {}
+    if username:
+        query["username"] = {"$regex": username, "$options": "i"}
+    if email:
+        query["email"] = {"$regex": email, "$options": "i"}
+    if role:
+        query["role"] = role
 
-    cursor = users_collection.find()
-    all_users = []
-    async for user in cursor:
-        all_users.append(user)
+    users = []
+    async for user in users_collection.find(query):
+        users.append(user_to_response(user))
 
-    filtered = []
-
-    # CODE QUALITY ISSUE: deeply nested if/else, high cyclomatic complexity
-    for user in all_users:
-        if username is not None:
-            if username.lower() in user.get("username", "").lower():
-                if email is not None:
-                    if email.lower() in user.get("email", "").lower():
-                        if role is not None:
-                            if user.get("role") == role:
-                                filtered.append(user_to_response(user))
-                        else:
-                            filtered.append(user_to_response(user))
-                else:
-                    if role is not None:
-                        if user.get("role") == role:
-                            filtered.append(user_to_response(user))
-                    else:
-                        filtered.append(user_to_response(user))
-        else:
-            if email is not None:
-                if email.lower() in user.get("email", "").lower():
-                    if role is not None:
-                        if user.get("role") == role:
-                            filtered.append(user_to_response(user))
-                    else:
-                        filtered.append(user_to_response(user))
-            else:
-                if role is not None:
-                    if user.get("role") == role:
-                        filtered.append(user_to_response(user))
-                else:
-                    filtered.append(user_to_response(user))
-
-    # Sort results
     if sort_by:
-        reverse = order and order.lower() == "desc"
-        filtered.sort(key=lambda u: u.get(sort_by, ""), reverse=reverse)
+        reverse = bool(order) and order.lower() == "desc"
+        users.sort(key=lambda u: u.get(sort_by, ""), reverse=reverse)
 
-    return filtered
+    return users
 
 
 @router.delete("/{user_id}")

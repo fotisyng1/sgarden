@@ -35,4 +35,3 @@ async def set_threshold(
     """Set the stock alert threshold value."""
     value = await alert_service.set_threshold(request.threshold)
     return {"threshold": value}
-

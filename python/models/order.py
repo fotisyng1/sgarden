@@ -1,7 +1,8 @@
 """Order domain models."""
 
-from pydantic import BaseModel, Field
 from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class OrderItem(BaseModel):
@@ -32,4 +33,3 @@ class OrderResponse(BaseModel):
     status: str = Field(default="pending", description="Order lifecycle status")
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
-

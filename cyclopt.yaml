@@ -1,0 +1,2 @@
+disable:
+  - R0903  # too-few-public-methods: expected for Pydantic BaseModel and exception classes

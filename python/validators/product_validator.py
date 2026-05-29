@@ -139,6 +139,3 @@ def _run_rules(rules: tuple[_Rule, ...], request: ProductRequest) -> None:
         rule(request, errors)
     if errors:
         raise ProductValidationError(errors)
-
-
-

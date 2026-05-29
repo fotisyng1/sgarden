@@ -22,4 +22,3 @@ class AlertResponse(BaseModel):
     name: str
     stock: int
     severity: str = Field(..., description="One of: critical, warning, info")
-

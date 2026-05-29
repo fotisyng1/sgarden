@@ -34,4 +34,3 @@ class InsufficientStockError(Exception):
             f"Insufficient stock for '{product_name}': "
             f"requested {requested}, available {available}"
         )
-
