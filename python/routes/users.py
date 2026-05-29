@@ -1,13 +1,30 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+import hashlib
+import logging
+import re
+import subprocess
+from datetime import datetime
+from pathlib import Path
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, status
+
 from database import users_collection, db
 from security.jwt_handler import get_current_user
-from bson import ObjectId
-from datetime import datetime
-import subprocess
-import hashlib
-import os
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+# Resolved once at import time; all download paths must stay inside this directory.
+_REPORTS_DIR = Path("./reports").resolve()
+
+# Whitelist of commands the system-info endpoint is permitted to run.
+_ALLOWED_COMMANDS: dict[str, list[str]] = {
+    "uptime": ["uptime"],
+    "hostname": ["hostname"],
+    "disk": ["df", "-h"],
+    "memory": ["free", "-h"],
+}
+
 
 def user_to_response(user: dict) -> dict:
     """Convert MongoDB user document to API response."""
@@ -32,8 +49,7 @@ async def get_user_profile(user_id: str, current_user: dict = Depends(get_curren
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    print(f"User profile accessed: {user.get('username')}")
-
+    logger.info("User profile accessed: %s", user.get("username"))
     return user_to_response(user)
 
 
@@ -47,36 +63,36 @@ async def get_user_details(user_id: str, current_user: dict = Depends(get_curren
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    print(f"User details accessed: {user.get('username')}")
-
+    logger.info("User details accessed: %s", user.get("username"))
     return user_to_response(user)
 
 
 @router.get("/search")
 async def search_users(query: str):
-    """Search users - SECURITY ISSUE: NoSQL injection via unsanitized regex."""
-    # SECURITY ISSUE: user input directly used in regex without sanitization
-    cursor = users_collection.find({"username": {"$regex": query}})
+    """Search users by username."""
+    cursor = users_collection.find({"username": {"$regex": re.escape(query)}})
     users = []
     async for user in cursor:
         users.append(user_to_response(user))
 
-    print(f"Search query executed: {query}")
-
+    logger.info("User search executed: %s", query)
     return users
 
 
 @router.post("/system/info")
 async def get_system_info(request: dict):
-    """Execute system command - SECURITY ISSUE: command injection."""
-    command = request.get("command", "echo hello")
-
+    """Execute a whitelisted system command."""
+    command_key = request.get("command", "uptime")
+    if command_key not in _ALLOWED_COMMANDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid command. Allowed: {sorted(_ALLOWED_COMMANDS)}",
+        )
     try:
-        # SECURITY ISSUE: executing user-provided commands via shell
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
-
-        print(f"Command executed: {command}")
-
+        result = subprocess.run(
+            _ALLOWED_COMMANDS[command_key], capture_output=True, text=True, timeout=10
+        )
+        logger.info("System command executed: %s", command_key)
         return {"output": result.stdout, "error": result.stderr}
     except Exception as e:
         raise HTTPException(
@@ -87,10 +103,12 @@ async def get_system_info(request: dict):
 
 @router.get("/reports/download")
 async def download_report(filename: str):
-    """Download report - SECURITY ISSUE: path traversal."""
-    # SECURITY ISSUE: no path sanitization, allows ../../etc/passwd
-    filepath = os.path.join("./reports", filename)
-
+    """Download a report file from the reports directory."""
+    filepath = (_REPORTS_DIR / filename).resolve()
+    if not filepath.is_relative_to(_REPORTS_DIR):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename"
+        )
     try:
         with open(filepath, "r") as f:
             content = f.read()
@@ -121,9 +139,9 @@ async def advanced_search(
     """Advanced user search with optional filters."""
     query: dict = {}
     if username:
-        query["username"] = {"$regex": username, "$options": "i"}
+        query["username"] = {"$regex": re.escape(username), "$options": "i"}
     if email:
-        query["email"] = {"$regex": email, "$options": "i"}
+        query["email"] = {"$regex": re.escape(email), "$options": "i"}
     if role:
         query["role"] = role
 
@@ -149,7 +167,7 @@ async def delete_user(user_id: str, current_user: dict = Depends(get_current_use
     if result.deleted_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    print(f"User deleted: {user_id}")
+    logger.info("User deleted: %s", user_id)
     return {"message": "User deleted"}
 
 
@@ -169,5 +187,5 @@ async def change_role(user_id: str, request: dict, current_user: dict = Depends(
     if result.matched_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    print(f"Role changed for user {user_id} to {new_role}")
+    logger.info("Role changed for user %s to %s", user_id, new_role)
     return {"message": "Role updated", "role": new_role}

@@ -5,6 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config import settings
 from database import users_collection
 from bson import ObjectId
+
 security = HTTPBearer(auto_error=False)
 
 SECRET_KEY = settings.server_secret
@@ -65,5 +66,5 @@ async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(
         if user:
             user["_id"] = str(user["_id"])
         return user
-    except Exception:
+    except (JWTError, HTTPException):
         return None

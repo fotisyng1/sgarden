@@ -1,7 +1,8 @@
+import logging
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 
 from config import settings
 from database import init_indexes
@@ -13,17 +14,19 @@ from routes.orders import router as orders_router
 from routes.alerts import router as alerts_router
 from routes.analytics import router as analytics_router
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("Starting SGarden API...")
+    logger.info("Starting SGarden API...")
     await init_indexes()
     await seed_data()
-    print("SGarden API started successfully")
+    logger.info("SGarden API started successfully")
     yield
     # Shutdown
-    print("Shutting down SGarden API...")
+    logger.info("Shutting down SGarden API...")
 
 
 app = FastAPI(
