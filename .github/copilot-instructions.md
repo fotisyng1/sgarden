@@ -1,0 +1,125 @@
+# Cyclopt Code Quality Analysis
+
+## Overview
+This project uses Cyclopt for automated code quality analysis. Cyclopt provides:
+- **Code Metrics**: Complexity, maintainability, lines of code
+- **Code Violations**: Best practice violations and code smells
+- **Security Analysis (SAST)**: Security vulnerabilities and unsafe patterns
+- **Code Duplication**: Duplicate code detection
+- **Dependency Vulnerabilities**: Known CVEs in dependencies
+
+## When to Suggest Cyclopt Analysis
+
+Suggest running Cyclopt analysis when:
+
+1. **After significant code changes**
+   - New features added
+   - Major refactoring completed
+   - Multiple files modified
+
+2. **Before committing code**
+   - Use: "Run Cyclopt analysis before committing"
+
+3. **When code smells are visible**
+   - Long methods (>50 lines)
+   - High complexity (nested loops, many conditions)
+   - Duplicated code patterns
+   - Security-sensitive operations (file I/O, network calls, user input)
+
+4. **When reviewing code**
+   - Before creating pull requests
+   - During code reviews
+
+## How to Use Cyclopt in JetBrains IDEs
+
+### Keyboard Shortcuts
+- **Analyze Current File**: `Ctrl+Alt+Y` (Windows/Linux) or `Cmd+Alt+Y` (Mac)
+- **Analyze Selected Files**: Right-click in Project view → "Cyclopt" → "Analyze Selected Files"
+
+### Menu Access
+- **Tools** → **Cyclopt** → [various actions]
+- Right-click in editor → **Cyclopt** → **Analyze Current File**
+
+### Available Analyzers
+- `metrics` - Code complexity and maintainability metrics
+- `violations` - Code style and best practice violations
+- `sast` - Security vulnerabilities (SQL injection, XSS, etc.)
+- `duplication` - Duplicate code detection
+- `vulnerabilities` - Dependency vulnerability scanning
+
+### Common Actions
+- **Analyze Current File**: Quick analysis of the file you're working on
+- **Select Analyzers & Analyze**: Choose specific analyzers to run
+- **Clear Results**: Remove all analysis results
+- **Export Report**: Save results as HTML/JSON/CSV
+- **Send to AI Chat**: Get AI help with fixing issues
+
+## Interpreting Results
+
+### Severity Levels
+- **Critical**: High priority - Must fix immediately (security vulnerabilities, critical bugs)
+- **Error**: High priority - Should fix before committing (logic errors, serious violations)
+- **Warning**: Medium priority - Should address (code smells, maintainability issues)
+- **Info**: Low priority - Consider improving (suggestions, best practices)
+
+### Code Quality Thresholds
+- **Cyclomatic Complexity**: Aim for <10 per function
+- **Maintainability Index**: Keep above 65
+- **Lines of Code**: Functions should be <50 lines
+- **Parameters**: Functions should have <5 parameters
+
+## Best Practices
+
+1. **Run analysis frequently**: Don't wait until the end
+2. **Fix open issues promptly**: Address issues as they're found
+3. **Prioritize by severity**: Address the most important issues first
+4. **Refactor high-complexity code**: Break down complex functions
+5. **Remove duplications**: DRY (Don't Repeat Yourself)
+6. **Keep dependencies updated**: Fix vulnerability findings
+
+## Integration with Development Workflow
+
+### Pre-commit Hooks
+Cyclopt can block commits with open issues:
+- **Install Pre-commit Hook**: Tools → Cyclopt → Install Pre-commit Hook
+- **Deactivate Pre-commit Hook**: Temporarily disable the hook
+
+### AI-Assisted Fixes
+Use "Send to AI Chat" feature to:
+- Get explanations of issues
+- Generate fixes for problems
+- Prioritize issues by impact
+
+## Example Suggestions for AI Assistants
+
+When you observe:
+- A new function being written → "Consider running Cyclopt to check complexity with Ctrl+Alt+Y"
+- Security-sensitive code → "Run Cyclopt SAST analyzer to check for vulnerabilities"
+- Before git commit → "Run Cyclopt analysis before committing"
+- Duplicated code patterns → "Use Cyclopt duplication analyzer to find all instances"
+- Adding dependencies → "Run Cyclopt vulnerability scanner after adding dependencies"
+- High complexity in code → "This function may exceed Cyclopt's complexity threshold. Consider refactoring."
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Analyze current file | `Ctrl+Alt+Y` (Win/Linux) or `Cmd+Alt+Y` (Mac) |
+| Analyze selection | Right-click → Cyclopt → Analyze Selected Files |
+| View results | View → Tool Windows → Cyclopt |
+| Clear results | Cyclopt tool window → Clear button |
+| Export report | Cyclopt tool window → Export button |
+| Send to AI | Cyclopt tool window → Send to AI Chat |
+| Install hook | Tools → Cyclopt → Install Pre-commit Hook |
+
+## For JetBrains AI Assistant Users
+
+When suggesting code changes, always consider:
+1. Running Cyclopt analysis after significant changes
+2. Checking the Cyclopt tool window for existing issues in the file
+3. Prioritizing fixes for Critical and Error level issues
+4. Using the "Send to AI Chat" feature in Cyclopt for context-aware assistance
+
+---
+
+**Note**: Always run Cyclopt analysis before committing code with security-sensitive changes or complex logic.
