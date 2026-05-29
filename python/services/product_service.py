@@ -34,7 +34,7 @@ def product_to_response(product: dict) -> dict:
     """
     return {
         "id": str(product["_id"]),
-        "name": product.get("name"),
+        "name": product.get("name") or "",
         "description": product.get("description"),
         "category": product.get("category"),
         "price": product.get("price"),

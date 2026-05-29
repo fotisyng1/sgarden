@@ -47,7 +47,7 @@ async def get_alerts() -> list[dict]:
     """Return alert objects for all products whose stock is below threshold."""
     threshold = await get_threshold()
     alerts: list[dict] = []
-    async for product in products_collection.find({"stock": {"$lt": threshold}}):
+    async for product in products_collection.find({"stock": {"$lt": threshold}, "name": {"$nin": [None, ""]}}):
         stock = product.get("stock", 0) or 0
         alerts.append({
             "productId": str(product["_id"]),
